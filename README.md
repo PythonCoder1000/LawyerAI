@@ -61,6 +61,7 @@ The pipeline returns a JSON object with:
 - `confidence` - per-field confidence scores (0.0 to 1.0)
 - `source` - extraction method used per field (`regex`, `rule`, `llm`, `hybrid`, `missing`)
 - `warnings` - any issues encountered during extraction
+- `raw_text` - the text that was taken from the pdf
 
 ## Configuration
 
