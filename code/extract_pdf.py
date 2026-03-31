@@ -29,7 +29,14 @@ from utils import (
     clean_value,
 )
 
-openai_client = OpenAI()
+_openai_client: OpenAI | None = None
+
+
+def get_openai_client() -> OpenAI:
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAI()
+    return _openai_client
 
 LINE_Y_TOLERANCE: float = 4.0
 CAPTION_GAP_THRESHOLD: float = 30.0
@@ -551,7 +558,7 @@ DOCUMENT TEXT:
 
 
 def call_openai_structured(prompt: str) -> dict[str, Any]:
-    response = openai_client.responses.create(
+    response = get_openai_client().responses.create(
         model=OPENAI_MODEL,
         input=[{"role": "user", "content": prompt}],
         text=EXTRACTION_SCHEMA,  # type: ignore
