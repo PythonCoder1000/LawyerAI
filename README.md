@@ -63,9 +63,75 @@ The pipeline returns a JSON object with:
 - `warnings` - any issues encountered during extraction
 - `raw_text` - the text that was taken from the pdf
 
+## Building to EXE
+
+To build LawyerAI as a standalone executable:
+
+### 1. Install PyInstaller
+
+```bash
+pip install pyinstaller
+```
+
+### 2. Uninstall pathlib
+
+PyInstaller conflicts with the `pathlib` package on PyPI. If you have it installed, remove it:
+
+```bash
+pip uninstall pathlib
+```
+
+This only removes the third-party backport. Python 3 includes `pathlib` in the standard library, so nothing will break.
+
+### 3. Run the build script
+
+```bash
+python build.py
+```
+
+The executable will be created at `dist/LawyerAI.exe`.
+
+# App (EXE)
+
+LawyerAI includes a graphical interface for extracting case information from court notice PDFs without using the command line.
+
+## Features
+
+- **PDF Browse & Extract** - Select any legal notice PDF and extract structured case fields with one click
+- **Model Selector** - Choose between OpenAI models directly in the app: `gpt-4o-mini`, `gpt-4o`, `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.4`
+- **Field Cards** - Each extracted field is displayed with its value, confidence score, and extraction source (regex, LLM, hybrid, etc.)
+- **API Cost Tracking** - Shows the total OpenAI API cost for each extraction at the bottom of the window
+- **Rate Limit Handling** - Automatically retries when OpenAI returns a 429 rate limit error, with a visible status message
+- **Error Popups** - User-friendly error dialogs for common issues (invalid API key, connection errors, missing files)
+- **Export JSON** - Save extraction results to a JSON file
+- **About Dialog** - Available under Help > About with version info
+
+## Output Fields
+
+The app displays the following extracted fields:
+
+| Field            | Description                               |
+|------------------|-------------------------------------------|
+| Case Name        | Full party names (e.g., "Smith v. Jones") |
+| Case Number      | Court case identifier                     |
+| Court Name       | Name of the court                         |
+| Hearing Date     | Scheduled hearing date                    |
+| Hearing Time     | Scheduled hearing time                    |
+| Hearing Location | Court address or department               |
+| Motion Name      | Title of the motion                       |
+| Motion Summary   | Concise summary of the motion's purpose   |
+
+Each field shows a **confidence score** (0-100%) and the **extraction source**:
+- **REGEX** - Extracted via pattern matching (most reliable)
+- **RULE** - Extracted via document structure rules
+- **LLM** - Extracted via OpenAI language model
+- **HYBRID** - Confirmed by both regex and LLM
+- **MISSING** - Could not be found
+
 ## Configuration
 
 Model settings can be changed in `code/utils.py`:
-- `OPENAI_MODEL` - OpenAI model name (default: `gpt-4o-mini`)
-- `OPENAI_MAX_TOKENS` - max output tokens
-- `OPENAI_TEMPERATURE` - sampling temperature (lower = more deterministic)
+- `OPENAI_MODEL` - Default OpenAI model (default: `gpt-5.4`)
+- `OPENAI_MAX_TOKENS` - Max output tokens
+- `OPENAI_TEMPERATURE` - Sampling temperature (lower = more deterministic)
+- `MODEL_PRICING` - Per-token pricing for cost tracking (update if OpenAI changes pricing)

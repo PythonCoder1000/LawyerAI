@@ -1,6 +1,8 @@
 import re
 import json
+import time
 import fitz
+import openai
 from openai import OpenAI
 from datetime import datetime
 from pathlib import WindowsPath
@@ -11,6 +13,7 @@ from utils import (
     OPENAI_MODEL,
     OPENAI_MAX_TOKENS,
     OPENAI_TEMPERATURE,
+    MODEL_PRICING,
     CONFIDENCE_HIGH,
     CONFIDENCE_MEDIUM,
     CONFIDENCE_LOW,
@@ -30,6 +33,10 @@ from utils import (
 )
 
 _openai_client: OpenAI | None = None
+
+_total_cost: float = 0.0
+_total_input_tokens: int = 0
+_total_output_tokens: int = 0
 
 
 def get_openai_client() -> OpenAI:
@@ -537,37 +544,65 @@ def build_semantic_prompt(
 
     context = "\n\n".join(context_parts)
 
-    return f"""You are a legal document extraction assistant. Extract structured fields from the legal notice below.
+    return f"""You are a legal document analysis system specializing in extracting structured metadata from U.S. court filings and legal notices. Your task is precise field extraction — accuracy matters more than completeness.
 
-ALREADY EXTRACTED (do not overwrite unless you find direct evidence of an error):
+CONTEXT:
+The document below is a legal notice or court filing. Some fields have already been extracted by a deterministic parser and are listed below. You must extract the remaining fields.
+
+ALREADY EXTRACTED (verified by regex — return null for these unless you find a clear error):
 {found_json}
 
-FIELDS STILL NEEDED: {missing_list}
+FIELDS TO EXTRACT: {missing_list}
 
-RULES:
-- Use null for any field you cannot find in the text.
-- Do NOT invent or guess values. Only extract what is explicitly stated.
-- For "motion_summary": write a concise, factual summary of the motion's purpose and requested relief. Keep it shorter than the original text. Do not speculate.
-- For "case_name": extract the full party names (e.g., "Smith v. Jones" or "In re Estate of Smith").
-- For "motion_name": extract the title of the motion (e.g., "Motion for Summary Judgment").
-- For "hearing_location": look for a street address or "located at" phrase in the body text. Do NOT use party names or business names as the location.
-- For fields already extracted, return null unless you find direct evidence of an error.
+EXTRACTION RULES:
+
+1. ACCURACY: Only extract values explicitly stated in the document. Never infer, guess, or fabricate. If a field cannot be found, return null.
+
+2. FIELD-SPECIFIC GUIDANCE:
+   - "case_name": The full case caption with all party names. Use "v." as the separator for adversarial cases (e.g., "Smith v. Jones"). For non-adversarial matters use the proper format (e.g., "In re Estate of Smith", "In the Matter of Jones"). Include all plaintiffs and defendants if listed.
+   - "case_number": The court's docket or case number, typically after "Case No.", "No.", or "#".
+   - "court_name": The full official name of the court (e.g., "Superior Court of California, County of Los Angeles"). Omit any "IN THE" prefix.
+   - "hearing_date": The scheduled hearing date. Return in "Month DD, YYYY" format (e.g., "January 15, 2025"). If multiple dates appear, use the one most clearly associated with the hearing.
+   - "hearing_time": The scheduled hearing time. Return in "HH:MM AM/PM" format (e.g., "09:30 AM").
+   - "hearing_location": The physical location of the hearing. Look for street addresses, "located at" phrases, department or courtroom numbers, or remote hearing URLs. Do NOT use party names, attorney names, firm names, or business names as locations.
+   - "motion_name": The formal title of the motion as stated in the document (e.g., "Motion for Summary Judgment", "Demurrer to Complaint").
+   - "motion_summary": A concise 1-3 sentence factual summary of what the motion requests and why. State the relief sought and the key legal basis. Paraphrase in plain language — do not quote the document verbatim.
+
+3. AMBIGUITY: If multiple possible values exist for a field (e.g., multiple dates), prefer the value most clearly labeled as hearing-related.
 
 DOCUMENT TEXT:
 {context}"""
 
 
 def call_openai_structured(prompt: str) -> dict[str, Any]:
-    response = get_openai_client().responses.create(
-        model=OPENAI_MODEL,
-        input=[{"role": "user", "content": prompt}],
-        text=EXTRACTION_SCHEMA,  # type: ignore
-        max_output_tokens=OPENAI_MAX_TOKENS,
-        temperature=OPENAI_TEMPERATURE,
-        store=False,
-    )
-    raw = response.output_text
-    return json.loads(raw)
+    global _total_cost, _total_input_tokens, _total_output_tokens
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            response = get_openai_client().responses.create(
+                model=OPENAI_MODEL,
+                input=[{"role": "user", "content": prompt}],
+                text=EXTRACTION_SCHEMA,  # type: ignore
+                max_output_tokens=OPENAI_MAX_TOKENS,
+                temperature=OPENAI_TEMPERATURE,
+                store=False,
+            )
+            if response.usage:
+                _total_input_tokens += response.usage.input_tokens
+                _total_output_tokens += response.usage.output_tokens
+                input_price, output_price = MODEL_PRICING.get(
+                    OPENAI_MODEL, (0.0, 0.0),
+                )
+                _total_cost += (
+                    response.usage.input_tokens * input_price
+                    + response.usage.output_tokens * output_price
+                )
+            raw = response.output_text
+            return json.loads(raw)
+        except openai.RateLimitError:
+            print("OpenAI rate limit reached! Retrying right now...")
+            time.sleep(1)
+    raise RuntimeError("OpenAI rate limit exceeded after multiple retries")
 
 
 def run_semantic_extraction(
@@ -663,10 +698,18 @@ def build_output(merged: dict[str, FieldResult], raw_text: str, warnings: list[s
         "source": {field: merged[field]["source"] for field in ALL_FIELDS},
         "warnings": warnings,
         "raw_text": raw_text,
+        "cost": _total_cost,
+        "input_tokens": _total_input_tokens,
+        "output_tokens": _total_output_tokens,
     }
 
 
 def extract_notice(pdf_path: WindowsPath) -> ExtractionResult:
+    global _total_cost, _total_input_tokens, _total_output_tokens
+    _total_cost = 0.0
+    _total_input_tokens = 0
+    _total_output_tokens = 0
+
     warnings: list[str] = []
 
     regions = parse_page1_layout(pdf_path)
@@ -704,3 +747,4 @@ if __name__ == "__main__":
     result = run_pipeline()
     output = json.dumps(result, indent=2, ensure_ascii=False)
     print(output)
+    print(f"\nTotal OpenAI API cost: ${result['cost']:.6f}")

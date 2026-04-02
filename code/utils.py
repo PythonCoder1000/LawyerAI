@@ -1,8 +1,37 @@
 from typing import TypedDict
 
-OPENAI_MODEL: str = "gpt-4o-mini"
+APP_VERSION: str = "v0.0.0-beta.2"
+
+OPENAI_MODEL: str = "gpt-5.4"
 OPENAI_MAX_TOKENS: int = 2048
 OPENAI_TEMPERATURE: float = 0.1
+
+AVAILABLE_MODELS: list[str] = [
+    "gpt-4o-mini",
+    "gpt-4o",
+    "gpt-5.4-nano",
+    "gpt-5.4-mini",
+    "gpt-5.4",
+]
+
+# Pricing per token (USD). Update these if OpenAI changes pricing.
+MODEL_PRICING: dict[str, tuple[float, float]] = {
+    #                   (input $/token,          output $/token)
+    "gpt-4o-mini":     (0.15  / 1_000_000,      0.60  / 1_000_000),
+    "gpt-4o":          (2.50  / 1_000_000,      10.00 / 1_000_000),
+    "gpt-5.4-nano":    (0.10  / 1_000_000,      0.40  / 1_000_000),
+    "gpt-5.4-mini":    (0.20  / 1_000_000,      0.80  / 1_000_000),
+    "gpt-5.4":         (2.00  / 1_000_000,      8.00  / 1_000_000),
+}
+
+# Approximate daily token limits per model (configurable).
+MODEL_DAILY_TOKEN_LIMITS: dict[str, int] = {
+    "gpt-4o-mini":  10_000_000,
+    "gpt-4o":        2_000_000,
+    "gpt-5.4-nano": 10_000_000,
+    "gpt-5.4-mini": 10_000_000,
+    "gpt-5.4":       2_000_000,
+}
 
 CONFIDENCE_HIGH: float = 0.95
 CONFIDENCE_MEDIUM: float = 0.75
@@ -52,6 +81,9 @@ class ExtractionResult(TypedDict):
     source: dict[str, str]
     warnings: list[str]
     raw_text: str
+    cost: float
+    input_tokens: int
+    output_tokens: int
 
 
 def clean_value(value: str | None) -> str | None:
