@@ -24,14 +24,10 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
     "gpt-5.4":         (2.00  / 1_000_000,      8.00  / 1_000_000),
 }
 
-# Approximate daily token limits per model (configurable).
-MODEL_DAILY_TOKEN_LIMITS: dict[str, int] = {
-    "gpt-4o-mini":  10_000_000,
-    "gpt-4o":        2_000_000,
-    "gpt-5.4-nano": 10_000_000,
-    "gpt-5.4-mini": 10_000_000,
-    "gpt-5.4":       2_000_000,
-}
+# Live rate limit data populated from OpenAI response headers after each API call.
+# Keyed by model name. Values: limit_requests (RPM), limit_tokens (TPM),
+# remaining_requests, remaining_tokens.
+model_rate_limits: dict[str, dict[str, int]] = {}
 
 CONFIDENCE_HIGH: float = 0.95
 CONFIDENCE_MEDIUM: float = 0.75

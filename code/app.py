@@ -4,16 +4,14 @@ from tkinter import filedialog, ttk, messagebox
 from pathlib import WindowsPath
 import threading
 import json
+import time as _time
 
 from datetime import datetime
 
 import openai
 import utils
 from extract_pdf import extract_notice
-from utils import (
-    ALL_FIELDS, AVAILABLE_MODELS, APP_VERSION,
-    MODEL_PRICING, MODEL_DAILY_TOKEN_LIMITS,
-)
+from utils import ALL_FIELDS, AVAILABLE_MODELS, APP_VERSION
 
 FIELD_LABELS: dict[str, str] = {
     "case_name": "Case Name",
@@ -36,69 +34,123 @@ SOURCE_COLORS: dict[str, str] = {
 
 
 class UsageCostsWindow(tk.Toplevel):
-    def __init__(self, parent: tk.Tk, history: list[dict]) -> None:
+    def __init__(self, parent: "App", history: list[dict]) -> None:
         super().__init__(parent)
         self.title("Usage & Costs")
-        self.geometry("750x520")
-        self.minsize(650, 400)
+        self.geometry("800x560")
+        self.minsize(700, 450)
         self.configure(bg="#f5f5f5")
         self.transient(parent)
+        self._parent = parent
         self._history = history
         self._build_ui()
 
     def _build_ui(self) -> None:
         # --- History table ---
-        header = tk.Label(
-            self, text="Extraction History", font=("Segoe UI", 14, "bold"),
+        hist_header = tk.Frame(self, bg="#f5f5f5")
+        hist_header.pack(fill=tk.X, padx=15, pady=(12, 4))
+
+        tk.Label(
+            hist_header, text="Extraction History", font=("Segoe UI", 14, "bold"),
             bg="#f5f5f5", fg="#1a237e",
+        ).pack(side=tk.LEFT)
+
+        clear_btn = tk.Button(
+            hist_header, text="Clear History", font=("Segoe UI", 9),
+            bg="#b71c1c", fg="white", activebackground="#8b0000",
+            activeforeground="white", relief=tk.FLAT, padx=10, pady=2,
+            cursor="hand2", command=self._clear_history,
         )
-        header.pack(anchor=tk.W, padx=15, pady=(12, 4))
+        clear_btn.pack(side=tk.RIGHT)
 
         table_frame = tk.Frame(self, bg="#f5f5f5", padx=15)
         table_frame.pack(fill=tk.BOTH, expand=True)
 
-        columns = ("time", "file", "model", "tokens", "cost")
-        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=10)
+        columns = ("time", "file", "model", "tokens", "cost", "elapsed")
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=8)
         self.tree.heading("time", text="Time")
         self.tree.heading("file", text="File")
         self.tree.heading("model", text="Model")
         self.tree.heading("tokens", text="Tokens")
         self.tree.heading("cost", text="Cost")
-        self.tree.column("time", width=80, anchor=tk.CENTER)
-        self.tree.column("file", width=250, anchor=tk.W)
-        self.tree.column("model", width=120, anchor=tk.CENTER)
-        self.tree.column("tokens", width=100, anchor=tk.E)
-        self.tree.column("cost", width=100, anchor=tk.E)
+        self.tree.heading("elapsed", text="Duration")
+        self.tree.column("time", width=70, anchor=tk.CENTER)
+        self.tree.column("file", width=220, anchor=tk.W)
+        self.tree.column("model", width=110, anchor=tk.CENTER)
+        self.tree.column("tokens", width=90, anchor=tk.E)
+        self.tree.column("cost", width=90, anchor=tk.E)
+        self.tree.column("elapsed", width=80, anchor=tk.CENTER)
 
         tree_scroll = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=tree_scroll.set)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-        for entry in self._history:
-            total_tok = entry.get("input_tokens", 0) + entry.get("output_tokens", 0)
-            self.tree.insert("", tk.END, values=(
-                entry.get("time", ""),
-                entry.get("file", ""),
-                entry.get("model", ""),
-                f"{total_tok:,}",
-                f"${entry.get('cost', 0):.6f}",
-            ))
+        self._populate_table()
 
-        if not self._history:
-            self.tree.insert("", tk.END, values=("", "No extractions yet", "", "", ""))
-
-        # --- Per-model summary ---
-        summary_label = tk.Label(
-            self, text="Per-Model Usage", font=("Segoe UI", 14, "bold"),
+        # --- Rate Limits (live from API) ---
+        tk.Label(
+            self, text="Rate Limits (from OpenAI API)", font=("Segoe UI", 14, "bold"),
             bg="#f5f5f5", fg="#1a237e",
-        )
-        summary_label.pack(anchor=tk.W, padx=15, pady=(12, 4))
+        ).pack(anchor=tk.W, padx=15, pady=(12, 4))
+
+        limits_frame = tk.Frame(self, bg="#f5f5f5", padx=15, pady=4)
+        limits_frame.pack(fill=tk.X)
+
+        live_limits = utils.model_rate_limits
+        if live_limits:
+            for model_name, limits in live_limits.items():
+                row = tk.Frame(limits_frame, bg="#ffffff", relief=tk.SOLID, borderwidth=1, padx=10, pady=6)
+                row.pack(fill=tk.X, pady=2)
+
+                tk.Label(
+                    row, text=model_name, font=("Segoe UI", 10, "bold"),
+                    bg="#ffffff", fg="#1a237e", width=14, anchor=tk.W,
+                ).pack(side=tk.LEFT)
+
+                limit_rpm = limits.get("limit_requests", 0)
+                remain_rpm = limits.get("remaining_requests", 0)
+                limit_tpm = limits.get("limit_tokens", 0)
+                remain_tpm = limits.get("remaining_tokens", 0)
+
+                tk.Label(
+                    row, text=f"RPM: {remain_rpm}/{limit_rpm}",
+                    font=("Segoe UI", 9), bg="#ffffff", fg="#424242",
+                ).pack(side=tk.LEFT, padx=(0, 15))
+
+                tk.Label(
+                    row, text=f"TPM: {remain_tpm:,}/{limit_tpm:,}",
+                    font=("Segoe UI", 9), bg="#ffffff", fg="#424242",
+                ).pack(side=tk.LEFT, padx=(0, 15))
+
+                # TPM usage bar
+                if limit_tpm > 0:
+                    used_pct = min((limit_tpm - remain_tpm) / limit_tpm, 1.0)
+                    bar_frame = tk.Frame(row, bg="#e0e0e0", height=12, width=120)
+                    bar_frame.pack(side=tk.RIGHT, padx=(5, 0))
+                    bar_frame.pack_propagate(False)
+                    fill_color = "#2e7d32" if used_pct < 0.5 else "#e65100" if used_pct < 0.8 else "#b71c1c"
+                    fill = tk.Frame(bar_frame, bg=fill_color, height=12, width=max(int(120 * used_pct), 1))
+                    fill.place(x=0, y=0)
+                    tk.Label(
+                        row, text=f"{used_pct * 100:.0f}% used",
+                        font=("Segoe UI", 8), bg="#ffffff", fg="#757575",
+                    ).pack(side=tk.RIGHT)
+        else:
+            tk.Label(
+                limits_frame, text="No rate limit data yet. Run an extraction first.",
+                font=("Segoe UI", 10), bg="#f5f5f5", fg="#757575",
+            ).pack(anchor=tk.W)
+
+        # --- Per-model cost summary ---
+        tk.Label(
+            self, text="Session Cost Summary", font=("Segoe UI", 14, "bold"),
+            bg="#f5f5f5", fg="#1a237e",
+        ).pack(anchor=tk.W, padx=15, pady=(12, 4))
 
         summary_frame = tk.Frame(self, bg="#f5f5f5", padx=15, pady=4)
         summary_frame.pack(fill=tk.X)
 
-        # Aggregate per model
         model_stats: dict[str, dict] = {}
         for entry in self._history:
             m = entry.get("model", "unknown")
@@ -110,48 +162,19 @@ class UsageCostsWindow(tk.Toplevel):
 
         if model_stats:
             for model_name, stats in model_stats.items():
-                row = tk.Frame(summary_frame, bg="#ffffff", relief=tk.SOLID, borderwidth=1, padx=10, pady=6)
-                row.pack(fill=tk.X, pady=2)
-
-                tk.Label(
-                    row, text=model_name, font=("Segoe UI", 10, "bold"),
-                    bg="#ffffff", fg="#1a237e", width=16, anchor=tk.W,
-                ).pack(side=tk.LEFT)
-
-                tk.Label(
-                    row, text=f"{stats['requests']} requests", font=("Segoe UI", 9),
-                    bg="#ffffff", fg="#424242",
-                ).pack(side=tk.LEFT, padx=(0, 15))
-
-                tk.Label(
-                    row, text=f"{stats['tokens']:,} tokens", font=("Segoe UI", 9),
-                    bg="#ffffff", fg="#424242",
-                ).pack(side=tk.LEFT, padx=(0, 15))
-
-                tk.Label(
-                    row, text=f"${stats['cost']:.6f}", font=("Segoe UI", 9, "bold"),
-                    bg="#ffffff", fg="#2e7d32",
-                ).pack(side=tk.LEFT, padx=(0, 15))
-
-                # Usage bar vs daily token limit
-                daily_limit = MODEL_DAILY_TOKEN_LIMITS.get(model_name, 0)
-                if daily_limit > 0:
-                    pct = min(stats["tokens"] / daily_limit, 1.0)
-                    bar_frame = tk.Frame(row, bg="#e0e0e0", height=12, width=120)
-                    bar_frame.pack(side=tk.RIGHT, padx=(5, 0))
-                    bar_frame.pack_propagate(False)
-                    fill_color = "#2e7d32" if pct < 0.5 else "#e65100" if pct < 0.8 else "#b71c1c"
-                    fill = tk.Frame(bar_frame, bg=fill_color, height=12, width=max(int(120 * pct), 1))
-                    fill.place(x=0, y=0)
-                    tk.Label(
-                        row, text=f"{pct * 100:.1f}% of daily limit",
-                        font=("Segoe UI", 8), bg="#ffffff", fg="#757575",
-                    ).pack(side=tk.RIGHT)
+                row = tk.Frame(summary_frame, bg="#ffffff", relief=tk.SOLID, borderwidth=1, padx=10, pady=4)
+                row.pack(fill=tk.X, pady=1)
+                tk.Label(row, text=model_name, font=("Segoe UI", 9, "bold"),
+                         bg="#ffffff", fg="#1a237e", width=14, anchor=tk.W).pack(side=tk.LEFT)
+                tk.Label(row, text=f"{stats['requests']} req", font=("Segoe UI", 9),
+                         bg="#ffffff", fg="#424242").pack(side=tk.LEFT, padx=(0, 10))
+                tk.Label(row, text=f"{stats['tokens']:,} tok", font=("Segoe UI", 9),
+                         bg="#ffffff", fg="#424242").pack(side=tk.LEFT, padx=(0, 10))
+                tk.Label(row, text=f"${stats['cost']:.6f}", font=("Segoe UI", 9, "bold"),
+                         bg="#ffffff", fg="#2e7d32").pack(side=tk.LEFT)
         else:
-            tk.Label(
-                summary_frame, text="No usage data yet.", font=("Segoe UI", 10),
-                bg="#f5f5f5", fg="#757575",
-            ).pack(anchor=tk.W)
+            tk.Label(summary_frame, text="No usage data yet.", font=("Segoe UI", 10),
+                     bg="#f5f5f5", fg="#757575").pack(anchor=tk.W)
 
         # --- Total cost ---
         total_cost = sum(e.get("cost", 0) for e in self._history)
@@ -161,6 +184,35 @@ class UsageCostsWindow(tk.Toplevel):
             total_frame, text=f"Total Session Cost: ${total_cost:.6f}",
             font=("Segoe UI", 12, "bold"), bg="#f5f5f5", fg="#1a237e",
         ).pack(side=tk.LEFT)
+        tk.Label(
+            total_frame, text=f"{len(self._history)} extraction(s)",
+            font=("Segoe UI", 10), bg="#f5f5f5", fg="#616161",
+        ).pack(side=tk.RIGHT)
+
+    def _populate_table(self) -> None:
+        for entry in self._history:
+            total_tok = entry.get("input_tokens", 0) + entry.get("output_tokens", 0)
+            self.tree.insert("", tk.END, values=(
+                entry.get("time", ""),
+                entry.get("file", ""),
+                entry.get("model", ""),
+                f"{total_tok:,}",
+                f"${entry.get('cost', 0):.6f}",
+                entry.get("elapsed", ""),
+            ))
+        if not self._history:
+            self.tree.insert("", tk.END, values=("", "No extractions yet", "", "", "", ""))
+
+    def _clear_history(self) -> None:
+        if not self._history:
+            return
+        if messagebox.askyesno("Clear History", "Clear all extraction history for this session?", parent=self):
+            self._history.clear()
+            utils.model_rate_limits.clear()
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+            self.tree.insert("", tk.END, values=("", "No extractions yet", "", "", "", ""))
+            self._parent._update_title()
 
 
 class App(tk.Tk):
@@ -172,8 +224,11 @@ class App(tk.Tk):
         self.configure(bg="#f5f5f5")
         self.pdf_path: WindowsPath | None = None
         self.usage_history: list[dict] = []
+        self._extraction_count: int = 0
+        self._extract_start: float = 0.0
         self._check_api_key()
         self._build_ui()
+        self._bind_shortcuts()
 
     def _check_api_key(self) -> None:
         if not os.environ.get("OPENAI_API_KEY"):
@@ -193,6 +248,12 @@ class App(tk.Tk):
             self.destroy()
             return
 
+    def _bind_shortcuts(self) -> None:
+        self.bind("<Control-o>", lambda _e: self._browse_file())
+        self.bind("<Control-e>", lambda _e: self._run_extraction())
+        self.bind("<Control-u>", lambda _e: self._show_usage())
+        self.bind("<Control-s>", lambda _e: self._export_json())
+
     def _on_model_change(self, _event: object) -> None:
         utils.OPENAI_MODEL = self.model_var.get()
 
@@ -207,13 +268,25 @@ class App(tk.Tk):
             f"Extracts structured case information from\n"
             f"court notice PDFs using regex parsing and\n"
             f"OpenAI language models.\n\n"
+            f"Keyboard Shortcuts:\n"
+            f"  Ctrl+O  Browse PDF\n"
+            f"  Ctrl+E  Extract\n"
+            f"  Ctrl+U  Usage & Costs\n"
+            f"  Ctrl+S  Export JSON\n\n"
             f"Created by Christian Jin",
         )
+
+    def _update_title(self) -> None:
+        base = "LawyerAI - Legal Notice Extractor"
+        if self._extraction_count > 0:
+            self.title(f"{base}  [{self._extraction_count} extraction(s)]")
+        else:
+            self.title(base)
 
     def _build_ui(self) -> None:
         menubar = tk.Menu(self)
         usage_menu = tk.Menu(menubar, tearoff=0)
-        usage_menu.add_command(label="View Usage & Costs", command=self._show_usage)
+        usage_menu.add_command(label="View Usage & Costs", command=self._show_usage, accelerator="Ctrl+U")
         menubar.add_cascade(label="Usage & Costs", menu=usage_menu)
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="About", command=self._show_about)
@@ -325,9 +398,15 @@ class App(tk.Tk):
         )
         self.cost_label.pack(side=tk.RIGHT, padx=(0, 15))
 
+        self.elapsed_label = tk.Label(
+            bottom, text="", font=("Segoe UI", 9), bg="#f5f5f5",
+            fg="#455a64", anchor=tk.E,
+        )
+        self.elapsed_label.pack(side=tk.RIGHT, padx=(0, 10))
+
         self.warnings_label = tk.Label(
             bottom, text="", font=("Segoe UI", 9), bg="#f5f5f5",
-            fg="#b71c1c", anchor=tk.W, wraplength=600, justify=tk.LEFT,
+            fg="#b71c1c", anchor=tk.W, wraplength=500, justify=tk.LEFT,
         )
         self.warnings_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -367,9 +446,17 @@ class App(tk.Tk):
             value_label = tk.Label(
                 card, text="--", font=("Segoe UI", 10),
                 bg="#ffffff", fg="#424242", anchor=tk.W,
-                wraplength=700, justify=tk.LEFT,
+                wraplength=700, justify=tk.LEFT, cursor="hand2",
             )
             value_label.pack(fill=tk.X, pady=(4, 0))
+
+            # Right-click to copy value
+            value_label.bind("<Button-3>", lambda _e, f=field: self._copy_field(f))
+            # Tooltip on hover
+            value_label.bind("<Enter>", lambda _e, lbl=value_label: lbl.configure(fg="#1565c0"))
+            value_label.bind("<Leave>", lambda _e, lbl=value_label, f=field: lbl.configure(
+                fg="#212121" if self.last_result and self.last_result.get(f) else "#b71c1c"
+            ))
 
             self.field_widgets[field] = { # type:ignore
                 "value": value_label,
@@ -377,6 +464,16 @@ class App(tk.Tk):
                 "confidence": confidence_label,
                 "card": card,
             }
+
+    def _copy_field(self, field: str) -> None:
+        if not self.last_result:
+            return
+        value = self.last_result.get(field)
+        if value:
+            self.clipboard_clear()
+            self.clipboard_append(str(value))
+            self.status_label.configure(text=f"Copied {FIELD_LABELS.get(field, field)} to clipboard")
+            self.after(2000, lambda: self.status_label.configure(text=""))
 
     def _browse_file(self) -> None:
         path = filedialog.askopenfilename(
@@ -404,6 +501,7 @@ class App(tk.Tk):
                     w.configure(bg="#ffffff")
         self.warnings_label.configure(text="")
         self.cost_label.configure(text="")
+        self.elapsed_label.configure(text="")
         self.last_result = None
         self.export_btn.configure(state=tk.DISABLED)
 
@@ -426,6 +524,7 @@ class App(tk.Tk):
             return
         self._reset_results()
         self._set_loading(True)
+        self._extract_start = _time.monotonic()
         thread = threading.Thread(target=self._extraction_worker, daemon=True)
         thread.start()
 
@@ -467,6 +566,9 @@ class App(tk.Tk):
         self._set_loading(False)
         self.last_result = result
 
+        elapsed = _time.monotonic() - self._extract_start
+        elapsed_str = f"{elapsed:.1f}s"
+
         for field in ALL_FIELDS:
             widgets = self.field_widgets[field]
             value = result.get(field)
@@ -499,6 +601,7 @@ class App(tk.Tk):
 
         cost = result.get("cost", 0.0)
         self.cost_label.configure(text=f"API Cost: ${cost:.6f}")
+        self.elapsed_label.configure(text=elapsed_str)
 
         filename = self.pdf_path.name if self.pdf_path else "unknown"
         self.usage_history.append({
@@ -508,9 +611,24 @@ class App(tk.Tk):
             "cost": cost,
             "input_tokens": result.get("input_tokens", 0),
             "output_tokens": result.get("output_tokens", 0),
+            "elapsed": elapsed_str,
         })
 
+        self._extraction_count += 1
+        self._update_title()
         self.export_btn.configure(state=tk.NORMAL)
+
+        # Show rate limits in status briefly
+        live = utils.model_rate_limits.get(utils.OPENAI_MODEL, {})
+        if live:
+            remain_rpm = live.get("remaining_requests", 0)
+            limit_rpm = live.get("limit_requests", 0)
+            remain_tpm = live.get("remaining_tokens", 0)
+            limit_tpm = live.get("limit_tokens", 0)
+            self.status_label.configure(
+                text=f"Done in {elapsed_str}  |  RPM: {remain_rpm}/{limit_rpm}  |  TPM: {remain_tpm:,}/{limit_tpm:,}"
+            )
+            self.after(8000, lambda: self.status_label.configure(text=""))
 
     def _display_error(self, title: str, message: str) -> None:
         self._set_loading(False)

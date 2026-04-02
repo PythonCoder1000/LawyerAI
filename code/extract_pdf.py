@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import WindowsPath
 from typing import Any
 
+import utils
 from parse_pdf import open_pdf, extract_text_by_page
 from utils import (
     OPENAI_MODEL,
@@ -574,12 +575,22 @@ DOCUMENT TEXT:
 {context}"""
 
 
+def _parse_header_int(headers: Any, key: str) -> int:
+    val = headers.get(key)
+    if val is None:
+        return 0
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return 0
+
+
 def call_openai_structured(prompt: str) -> dict[str, Any]:
     global _total_cost, _total_input_tokens, _total_output_tokens
     max_retries = 5
     for attempt in range(max_retries):
         try:
-            response = get_openai_client().responses.create(
+            raw_response = get_openai_client().responses.with_raw_response.create(
                 model=OPENAI_MODEL,
                 input=[{"role": "user", "content": prompt}],
                 text=EXTRACTION_SCHEMA,  # type: ignore
@@ -587,6 +598,17 @@ def call_openai_structured(prompt: str) -> dict[str, Any]:
                 temperature=OPENAI_TEMPERATURE,
                 store=False,
             )
+            response = raw_response.parse()
+
+            # Store live rate limits from OpenAI response headers
+            headers = raw_response.headers
+            utils.model_rate_limits[OPENAI_MODEL] = {
+                "limit_requests": _parse_header_int(headers, "x-ratelimit-limit-requests"),
+                "limit_tokens": _parse_header_int(headers, "x-ratelimit-limit-tokens"),
+                "remaining_requests": _parse_header_int(headers, "x-ratelimit-remaining-requests"),
+                "remaining_tokens": _parse_header_int(headers, "x-ratelimit-remaining-tokens"),
+            }
+
             if response.usage:
                 _total_input_tokens += response.usage.input_tokens
                 _total_output_tokens += response.usage.output_tokens
