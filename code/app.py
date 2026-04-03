@@ -10,7 +10,7 @@ from datetime import datetime
 
 import openai
 import utils
-from extract_pdf import extract_notice
+from extract_pdf import extract_notice, set_api_key, reset_api_key
 from utils import ALL_FIELDS, AVAILABLE_MODELS, APP_VERSION
 
 FIELD_LABELS: dict[str, str] = {
@@ -226,27 +226,36 @@ class App(tk.Tk):
         self.usage_history: list[dict] = []
         self._extraction_count: int = 0
         self._extract_start: float = 0.0
+        self._key_source = tk.StringVar(value="key.txt")
+        self._key_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "key.txt")
         self._check_api_key()
         self._build_ui()
         self._bind_shortcuts()
 
     def _check_api_key(self) -> None:
-        if not os.environ.get("OPENAI_API_KEY"):
-            self.withdraw()
-            messagebox.showwarning(
-                "API Key Missing",
-                "Please set your environment variable OPENAI_API_KEY in order to use this app!\n\n"
-                "On Windows:\n"
-                "1. Open Start and search for \"Environment Variables\"\n"
-                "2. Click \"Edit the system environment variables\"\n"
-                "3. Click \"Environment Variables\"\n"
-                "4. Under User variables, click New\n"
-                "5. Variable name: OPENAI_API_KEY\n"
-                "6. Variable value: your API key\n\n"
-                "Then restart the app.",
-            )
-            self.destroy()
+        # 1. Try key.txt in the same directory as this script
+        if os.path.isfile(self._key_file_path):
+            with open(self._key_file_path, "r", encoding="utf-8") as f:
+                key = f.read().strip()
+            if key:
+                set_api_key(key)
+                self._key_source.set("key.txt")
+                return
+        # 2. Fall back to environment variable
+        if os.environ.get("OPENAI_API_KEY"):
+            self._key_source.set("env")
             return
+        # 3. No key found
+        self.withdraw()
+        messagebox.showwarning(
+            "API Key Missing",
+            "No OpenAI API key found.\n\n"
+            "Paste your key into key.txt (in the code folder),\n"
+            "or set the OPENAI_API_KEY environment variable.\n\n"
+            "Then restart the app.",
+        )
+        self.destroy()
+        return
 
     def _bind_shortcuts(self) -> None:
         self.bind("<Control-o>", lambda _e: self._browse_file())
@@ -288,6 +297,66 @@ class App(tk.Tk):
         usage_menu = tk.Menu(menubar, tearoff=0)
         usage_menu.add_command(label="View Usage & Costs", command=self._show_usage, accelerator="Ctrl+U")
         menubar.add_cascade(label="Usage & Costs", menu=usage_menu)
+        exp_menu = tk.Menu(menubar, tearoff=0)
+        exp_menu.add_command(
+            label="Trigger: Auth Error",
+            command=lambda: self._trigger_test_error(
+                "Invalid API Key",
+                "Your OpenAI API key is invalid or expired.\n\n"
+                "Please check your key in key.txt and restart the app.",
+            ),
+        )
+        exp_menu.add_command(
+            label="Trigger: Rate Limit",
+            command=lambda: self._trigger_test_error(
+                "Rate Limit Exceeded",
+                "OpenAI rate limit reached and retries were exhausted.\n\n"
+                "Please wait a minute and try again.",
+            ),
+        )
+        exp_menu.add_command(
+            label="Trigger: Connection Error",
+            command=lambda: self._trigger_test_error(
+                "Connection Error",
+                "Could not connect to OpenAI.\n\n"
+                "Please check your internet connection and try again.",
+            ),
+        )
+        exp_menu.add_command(
+            label="Trigger: API Error (500)",
+            command=lambda: self._trigger_test_error(
+                "OpenAI API Error",
+                "The OpenAI API returned an error (status 500).\n\n"
+                "Please try again later.",
+            ),
+        )
+        exp_menu.add_command(
+            label="Trigger: File Not Found",
+            command=lambda: self._trigger_test_error(
+                "File Not Found",
+                "The selected PDF file could not be found.\n\n"
+                "It may have been moved or deleted. Please select the file again.",
+            ),
+        )
+        exp_menu.add_command(
+            label="Trigger: Unexpected Error",
+            command=lambda: self._trigger_test_error(
+                "Unexpected Error",
+                "Something went wrong during extraction:\n\nZeroDivisionError: division by zero",
+            ),
+        )
+        exp_menu.add_separator()
+        exp_menu.add_radiobutton(
+            label="Use key.txt",
+            variable=self._key_source, value="key.txt",
+            command=self._switch_key_source,
+        )
+        exp_menu.add_radiobutton(
+            label="Use Environment Variable",
+            variable=self._key_source, value="env",
+            command=self._switch_key_source,
+        )
+        menubar.add_cascade(label="Experimental", menu=exp_menu)
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="About", command=self._show_about)
         menubar.add_cascade(label="Help", menu=help_menu)
@@ -519,6 +588,41 @@ class App(tk.Tk):
             self.progress.stop()
             self.progress.pack_forget()
 
+    def _switch_key_source(self) -> None:
+        source = self._key_source.get()
+        if source == "key.txt":
+            if not os.path.isfile(self._key_file_path):
+                messagebox.showwarning("key.txt Not Found", "key.txt was not found in the code folder.")
+                self._key_source.set("env")
+                return
+            with open(self._key_file_path, "r", encoding="utf-8") as f:
+                key = f.read().strip()
+            if not key:
+                messagebox.showwarning("Empty Key", "key.txt is empty. Please paste your API key into it.")
+                self._key_source.set("env")
+                return
+            set_api_key(key)
+            self.status_label.configure(text="Switched to key.txt")
+        else:
+            if not os.environ.get("OPENAI_API_KEY"):
+                messagebox.showwarning("No Env Variable", "OPENAI_API_KEY environment variable is not set.")
+                self._key_source.set("key.txt")
+                return
+            reset_api_key()
+            self.status_label.configure(text="Switched to environment variable")
+        self.after(3000, lambda: self.status_label.configure(text=""))
+
+    def _trigger_test_error(self, title: str, message: str) -> None:
+        """Simulate the full loading-then-error flow for testing."""
+        self._reset_results()
+        self._set_loading(True)
+
+        def worker() -> None:
+            _time.sleep(1)
+            self.after(0, self._display_error, title, message)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def _run_extraction(self) -> None:
         if not self.pdf_path:
             return
@@ -536,7 +640,7 @@ class App(tk.Tk):
             self.after(0, self._display_error,
                     "Invalid API Key",
                     "Your OpenAI API key is invalid or expired.\n\n"
-                    "Please check your OPENAI_API_KEY environment variable and restart the app.")
+                    "Please check your key in key.txt and restart the app.")
         except openai.RateLimitError:
             self.after(0, self._display_error,
                     "Rate Limit Exceeded",

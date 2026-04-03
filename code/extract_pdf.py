@@ -11,9 +11,6 @@ from typing import Any
 import utils
 from parse_pdf import open_pdf, extract_text_by_page
 from utils import (
-    OPENAI_MODEL,
-    OPENAI_MAX_TOKENS,
-    OPENAI_TEMPERATURE,
     MODEL_PRICING,
     CONFIDENCE_HIGH,
     CONFIDENCE_MEDIUM,
@@ -45,6 +42,18 @@ def get_openai_client() -> OpenAI:
     if _openai_client is None:
         _openai_client = OpenAI()
     return _openai_client
+
+
+def set_api_key(api_key: str) -> None:
+    """Reset the OpenAI client with an explicit API key."""
+    global _openai_client
+    _openai_client = OpenAI(api_key=api_key)
+
+
+def reset_api_key() -> None:
+    """Reset the OpenAI client to use the environment variable."""
+    global _openai_client
+    _openai_client = OpenAI()
 
 LINE_Y_TOLERANCE: float = 4.0
 CAPTION_GAP_THRESHOLD: float = 30.0
@@ -587,22 +596,25 @@ def _parse_header_int(headers: Any, key: str) -> int:
 
 def call_openai_structured(prompt: str) -> dict[str, Any]:
     global _total_cost, _total_input_tokens, _total_output_tokens
-    max_retries = 5
+    max_retries = 6
+    base_delay = 1.0
+    model = utils.OPENAI_MODEL
+
     for attempt in range(max_retries):
         try:
             raw_response = get_openai_client().responses.with_raw_response.create(
-                model=OPENAI_MODEL,
+                model=model,
                 input=[{"role": "user", "content": prompt}],
                 text=EXTRACTION_SCHEMA,  # type: ignore
-                max_output_tokens=OPENAI_MAX_TOKENS,
-                temperature=OPENAI_TEMPERATURE,
+                max_output_tokens=utils.OPENAI_MAX_TOKENS,
+                temperature=utils.OPENAI_TEMPERATURE,
                 store=False,
             )
             response = raw_response.parse()
 
             # Store live rate limits from OpenAI response headers
             headers = raw_response.headers
-            utils.model_rate_limits[OPENAI_MODEL] = {
+            utils.model_rate_limits[model] = {
                 "limit_requests": _parse_header_int(headers, "x-ratelimit-limit-requests"),
                 "limit_tokens": _parse_header_int(headers, "x-ratelimit-limit-tokens"),
                 "remaining_requests": _parse_header_int(headers, "x-ratelimit-remaining-requests"),
@@ -613,7 +625,7 @@ def call_openai_structured(prompt: str) -> dict[str, Any]:
                 _total_input_tokens += response.usage.input_tokens
                 _total_output_tokens += response.usage.output_tokens
                 input_price, output_price = MODEL_PRICING.get(
-                    OPENAI_MODEL, (0.0, 0.0),
+                    model, (0.0, 0.0),
                 )
                 _total_cost += (
                     response.usage.input_tokens * input_price
@@ -622,8 +634,15 @@ def call_openai_structured(prompt: str) -> dict[str, Any]:
             raw = response.output_text
             return json.loads(raw)
         except openai.RateLimitError:
-            print("OpenAI rate limit reached! Retrying right now...")
-            time.sleep(1)
+            delay = base_delay * (2 ** attempt)  # 1s, 2s, 4s, 8s, 16s, 32s
+            print(f"Rate limit reached. Retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries})...")
+            time.sleep(delay)
+        except (openai.APIConnectionError, openai.APITimeoutError):
+            if attempt == max_retries - 1:
+                raise
+            delay = base_delay * (2 ** attempt)
+            print(f"Connection error. Retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries})...")
+            time.sleep(delay)
     raise RuntimeError("OpenAI rate limit exceeded after multiple retries")
 
 
