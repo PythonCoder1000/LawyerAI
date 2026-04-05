@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('C:\\Users\\chris\\Music\\AI Coding\\LawyerAI\\code\\utils.py', '.'), ('C:\\Users\\chris\\Music\\AI Coding\\LawyerAI\\code\\parse_pdf.py', '.'), ('C:\\Users\\chris\\Music\\AI Coding\\LawyerAI\\code\\extract_pdf.py', '.')]
+datas = [('c:\\Users\\chris\\Music\\AI Coding\\LawyerAI\\code\\utils.py', '.'), ('c:\\Users\\chris\\Music\\AI Coding\\LawyerAI\\code\\parse_pdf.py', '.'), ('c:\\Users\\chris\\Music\\AI Coding\\LawyerAI\\code\\extract_pdf.py', '.')]
 binaries = []
 hiddenimports = ['openai', 'fitz', 'pymupdf']
 tmp_ret = collect_all('pymupdf')
@@ -11,7 +11,7 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['C:\\Users\\chris\\Music\\AI Coding\\LawyerAI\\code\\app.py'],
+    ['c:\\Users\\chris\\Music\\AI Coding\\LawyerAI\\code\\app.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,

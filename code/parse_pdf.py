@@ -26,29 +26,18 @@ def open_pdf() -> WindowsPath:
     return WindowsPath(filename)
 
 
-def extract_text(path: WindowsPath) -> str:
-    document = fitz.open(path)
-    pages = []
-
-    for page in document:
-        pages.append(page.get_text("text", sort=True))
-
-    text = "\n".join(pages)
-
-    return text
-
-
 def extract_text_by_page(path: WindowsPath) -> PagesResult:
     document = fitz.open(path)
-    pages: list[PageData] = []
-
-    for i in range(len(document)):
-        page = document[i]
-        page_text: str = str(page.get_text("text", sort=True))
-        entry: PageData = {
-            "page_num": i + 1,
-            "text": page_text,
-        }
-        pages.append(entry)
-
-    return {"pages": pages}
+    try:
+        pages: list[PageData] = []
+        for i in range(len(document)):
+            page = document[i]
+            page_text: str = str(page.get_text("text", sort=True))
+            entry: PageData = {
+                "page_num": i + 1,
+                "text": page_text,
+            }
+            pages.append(entry)
+        return {"pages": pages}
+    finally:
+        document.close()

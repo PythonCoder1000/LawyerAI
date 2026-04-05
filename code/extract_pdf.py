@@ -1,12 +1,13 @@
-import re
 import json
+import re
 import time
-import fitz
-import openai
-from openai import OpenAI
 from datetime import datetime
 from pathlib import WindowsPath
 from typing import Any
+
+import fitz
+import openai
+from openai import OpenAI
 
 import utils
 from parse_pdf import open_pdf, extract_text_by_page
@@ -43,17 +44,6 @@ def get_openai_client() -> OpenAI:
         _openai_client = OpenAI()
     return _openai_client
 
-
-def set_api_key(api_key: str) -> None:
-    """Reset the OpenAI client with an explicit API key."""
-    global _openai_client
-    _openai_client = OpenAI(api_key=api_key)
-
-
-def reset_api_key() -> None:
-    """Reset the OpenAI client to use the environment variable."""
-    global _openai_client
-    _openai_client = OpenAI()
 
 LINE_Y_TOLERANCE: float = 4.0
 CAPTION_GAP_THRESHOLD: float = 30.0
@@ -281,15 +271,18 @@ def build_page_regions(lines: list[Line], page_width: float) -> PageRegions:
 
 def parse_page1_layout(pdf_path: WindowsPath) -> PageRegions:
     document = fitz.open(pdf_path)
-    if len(document) == 0:
-        return PageRegions("", "", "", "", "", False)
-    page = document[0]
-    words, width, height = extract_page_words(page)
-    if not words:
-        fallback = str(page.get_text("text", sort=True))
-        return PageRegions("", "", "", fallback, fallback, False)
-    lines = group_words_into_lines(words)
-    return build_page_regions(lines, width)
+    try:
+        if len(document) == 0:
+            return PageRegions("", "", "", "", "", False)
+        page = document[0]
+        words, width, height = extract_page_words(page)
+        if not words:
+            fallback = str(page.get_text("text", sort=True))
+            return PageRegions("", "", "", fallback, fallback, False)
+        lines = group_words_into_lines(words)
+        return build_page_regions(lines, width)
+    finally:
+        document.close()
 
 
 def get_motion_text(pdf_path: WindowsPath) -> str:

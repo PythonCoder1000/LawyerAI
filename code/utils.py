@@ -1,6 +1,6 @@
 from typing import TypedDict
 
-APP_VERSION: str = "v0.0.0-beta.2"
+APP_VERSION: str = "v0.0.0-beta.4"
 
 OPENAI_MODEL: str = "gpt-5.4"
 OPENAI_MAX_TOKENS: int = 2048

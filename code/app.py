@@ -1,16 +1,16 @@
-import os
-import tkinter as tk
-from tkinter import filedialog, ttk, messagebox
-from pathlib import WindowsPath
-import threading
 import json
+import os
+import threading
 import time as _time
-
+import tkinter as tk
 from datetime import datetime
+from pathlib import WindowsPath
+from tkinter import filedialog, ttk, messagebox
 
 import openai
+
 import utils
-from extract_pdf import extract_notice, set_api_key, reset_api_key
+from extract_pdf import extract_notice
 from utils import ALL_FIELDS, AVAILABLE_MODELS, APP_VERSION
 
 FIELD_LABELS: dict[str, str] = {
@@ -226,36 +226,21 @@ class App(tk.Tk):
         self.usage_history: list[dict] = []
         self._extraction_count: int = 0
         self._extract_start: float = 0.0
-        self._key_source = tk.StringVar(value="key.txt")
-        self._key_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "key.txt")
         self._check_api_key()
         self._build_ui()
         self._bind_shortcuts()
 
     def _check_api_key(self) -> None:
-        # 1. Try key.txt in the same directory as this script
-        if os.path.isfile(self._key_file_path):
-            with open(self._key_file_path, "r", encoding="utf-8") as f:
-                key = f.read().strip()
-            if key:
-                set_api_key(key)
-                self._key_source.set("key.txt")
-                return
-        # 2. Fall back to environment variable
         if os.environ.get("OPENAI_API_KEY"):
-            self._key_source.set("env")
             return
-        # 3. No key found
         self.withdraw()
         messagebox.showwarning(
             "API Key Missing",
             "No OpenAI API key found.\n\n"
-            "Paste your key into key.txt (in the code folder),\n"
-            "or set the OPENAI_API_KEY environment variable.\n\n"
-            "Then restart the app.",
+            "Set the OPENAI_API_KEY environment variable,\n"
+            "then restart the app.",
         )
         self.destroy()
-        return
 
     def _bind_shortcuts(self) -> None:
         self.bind("<Control-o>", lambda _e: self._browse_file())
@@ -303,7 +288,7 @@ class App(tk.Tk):
             command=lambda: self._trigger_test_error(
                 "Invalid API Key",
                 "Your OpenAI API key is invalid or expired.\n\n"
-                "Please check your key in key.txt and restart the app.",
+                "Please check your API key and restart the app.",
             ),
         )
         exp_menu.add_command(
@@ -344,17 +329,6 @@ class App(tk.Tk):
                 "Unexpected Error",
                 "Something went wrong during extraction:\n\nZeroDivisionError: division by zero",
             ),
-        )
-        exp_menu.add_separator()
-        exp_menu.add_radiobutton(
-            label="Use key.txt",
-            variable=self._key_source, value="key.txt",
-            command=self._switch_key_source,
-        )
-        exp_menu.add_radiobutton(
-            label="Use Environment Variable",
-            variable=self._key_source, value="env",
-            command=self._switch_key_source,
         )
         menubar.add_cascade(label="Experimental", menu=exp_menu)
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -445,7 +419,8 @@ class App(tk.Tk):
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
+        canvas.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
+        self.results_container.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
 
         self.field_widgets: dict[str, dict[str, tk.Label]] = {}
         self._build_field_cards()
@@ -588,30 +563,6 @@ class App(tk.Tk):
             self.progress.stop()
             self.progress.pack_forget()
 
-    def _switch_key_source(self) -> None:
-        source = self._key_source.get()
-        if source == "key.txt":
-            if not os.path.isfile(self._key_file_path):
-                messagebox.showwarning("key.txt Not Found", "key.txt was not found in the code folder.")
-                self._key_source.set("env")
-                return
-            with open(self._key_file_path, "r", encoding="utf-8") as f:
-                key = f.read().strip()
-            if not key:
-                messagebox.showwarning("Empty Key", "key.txt is empty. Please paste your API key into it.")
-                self._key_source.set("env")
-                return
-            set_api_key(key)
-            self.status_label.configure(text="Switched to key.txt")
-        else:
-            if not os.environ.get("OPENAI_API_KEY"):
-                messagebox.showwarning("No Env Variable", "OPENAI_API_KEY environment variable is not set.")
-                self._key_source.set("key.txt")
-                return
-            reset_api_key()
-            self.status_label.configure(text="Switched to environment variable")
-        self.after(3000, lambda: self.status_label.configure(text=""))
-
     def _trigger_test_error(self, title: str, message: str) -> None:
         """Simulate the full loading-then-error flow for testing."""
         self._reset_results()
@@ -640,7 +591,7 @@ class App(tk.Tk):
             self.after(0, self._display_error,
                     "Invalid API Key",
                     "Your OpenAI API key is invalid or expired.\n\n"
-                    "Please check your key in key.txt and restart the app.")
+                    "Please check your API key and restart the app.")
         except openai.RateLimitError:
             self.after(0, self._display_error,
                     "Rate Limit Exceeded",
