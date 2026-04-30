@@ -1,7 +1,7 @@
 import fitz
 import tkinter as tk
 from tkinter import filedialog
-from pathlib import WindowsPath
+from pathlib import Path
 from typing import TypedDict
 
 
@@ -14,7 +14,7 @@ class PagesResult(TypedDict):
     pages: list[PageData]
 
 
-def open_pdf() -> WindowsPath:
+def open_pdf() -> Path:
     root = tk.Tk()
     root.withdraw()
 
@@ -23,10 +23,10 @@ def open_pdf() -> WindowsPath:
         filetypes=(("PDF files", "*.pdf"), ("All files", "*.*"))
     )
 
-    return WindowsPath(filename)
+    return Path(filename)
 
 
-def extract_text_by_page(path: WindowsPath) -> PagesResult:
+def extract_text_by_page(path: Path) -> PagesResult:
     document = fitz.open(path)
     try:
         pages: list[PageData] = []

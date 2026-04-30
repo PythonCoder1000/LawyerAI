@@ -4,7 +4,7 @@ import threading
 import time as _time
 import tkinter as tk
 from datetime import datetime
-from pathlib import WindowsPath
+from pathlib import Path
 from tkinter import filedialog, ttk, messagebox
 
 import openai
@@ -222,7 +222,7 @@ class App(tk.Tk):
         self.geometry("900x740")
         self.minsize(750, 600)
         self.configure(bg="#f5f5f5")
-        self.pdf_path: WindowsPath | None = None
+        self.pdf_path: Path | None = None
         self.usage_history: list[dict] = []
         self._extraction_count: int = 0
         self._extract_start: float = 0.0
@@ -525,7 +525,7 @@ class App(tk.Tk):
             filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
         )
         if path:
-            self.pdf_path = WindowsPath(path)
+            self.pdf_path = Path(path)
             display_name = self.pdf_path.name
             if len(display_name) > 60:
                 display_name = display_name[:57] + "..."

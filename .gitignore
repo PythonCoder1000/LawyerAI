@@ -40,3 +40,4 @@ venv.bak/
 .idea/
 .vscode/
 key.txt
+.DS_Store

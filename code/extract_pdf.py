@@ -2,7 +2,7 @@ import json
 import re
 import time
 from datetime import datetime
-from pathlib import WindowsPath
+from pathlib import Path
 from typing import Any
 
 import fitz
@@ -269,7 +269,7 @@ def build_page_regions(lines: list[Line], page_width: float) -> PageRegions:
     )
 
 
-def parse_page1_layout(pdf_path: WindowsPath) -> PageRegions:
+def parse_page1_layout(pdf_path: Path) -> PageRegions:
     document = fitz.open(pdf_path)
     try:
         if len(document) == 0:
@@ -285,7 +285,7 @@ def parse_page1_layout(pdf_path: WindowsPath) -> PageRegions:
         document.close()
 
 
-def get_motion_text(pdf_path: WindowsPath) -> str:
+def get_motion_text(pdf_path: Path) -> str:
     pages_result = extract_text_by_page(pdf_path)
     total = len(pages_result["pages"])
     if total < 2:
@@ -301,7 +301,7 @@ def get_motion_text(pdf_path: WindowsPath) -> str:
     return text
 
 
-def get_full_raw_text(pdf_path: WindowsPath) -> str:
+def get_full_raw_text(pdf_path: Path) -> str:
     pages_result = extract_text_by_page(pdf_path)
     return "\n".join(page["text"] for page in pages_result["pages"])
 
@@ -738,7 +738,7 @@ def build_output(merged: dict[str, FieldResult], raw_text: str, warnings: list[s
     }
 
 
-def extract_notice(pdf_path: WindowsPath) -> ExtractionResult:
+def extract_notice(pdf_path: Path) -> ExtractionResult:
     global _total_cost, _total_input_tokens, _total_output_tokens
     _total_cost = 0.0
     _total_input_tokens = 0
