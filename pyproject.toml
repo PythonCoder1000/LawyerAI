@@ -11,3 +11,8 @@ dependencies = [
     "pymupdf4llm>=1.27.2.3",
     "streamlit>=1.57.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.12",
+]
