@@ -3,3 +3,5 @@
 __pycache__/
 *.pyc
 .vscode/
+# Streamlit secrets - never commit
+.streamlit/secrets.toml
