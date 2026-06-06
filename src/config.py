@@ -3,18 +3,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
 EXTRACT_LLM_PROMPT = """\
 You are a meticulous legal-document data extractor. Your job is to read a legal
-filing (provided as Markdown converted from a PDF) and return structured fields
-exactly matching the requested schema.
+filing (provided as a PDF) and return structured fields exactly matching the
+requested schema.
 
 ## Input
-- The text is Markdown extracted from a PDF. Headings (`#`), tables, page breaks,
-    and line breaks are preserved but may be noisy: hyphenation across lines,
-    duplicated headers/footers, page numbers, OCR artifacts, and stray whitespace
-    are common. Treat them as noise — do not let them corrupt extracted values.
+- You are given the original PDF filing — each page is provided as both its
+    extracted text and its rendered image. Scanned pages may carry OCR noise
+    (hyphenation across line breaks, duplicated headers/footers, page numbers,
+    stray whitespace); treat such artifacts as noise and do not let them corrupt
+    extracted values.
 - The caption block (top of the first page) is the most reliable source for
     case_name, case_number, and court_name. The notice/hearing block is the most
     reliable source for hearing_date, hearing_time, and hearing_location.
@@ -37,9 +38,11 @@ exactly matching the requested schema.
 5. **Hearing time.** Extract as components: `hour` (1-12 on a 12-hour clock as
     written), `minute` (0-59), and `meridiem` (`AM`/`PM`). For `timezone`, return
     the matching IANA zone only when a zone is explicitly stated — map
-    PT/PST/PDT → `America/Los_Angeles`, MT/MST/MDT → `America/Denver`,
-    CT/CST/CDT → `America/Chicago`, ET/EST/EDT → `America/New_York`. If no zone
-    is stated, leave `timezone` `null`. Do not guess the zone from the court's
+    PT/PST/PDT → `America/Los_Angeles`, MT/MDT → `America/Denver`,
+    CT/CST/CDT → `America/Chicago`, ET/EST/EDT → `America/New_York`,
+    MST (Arizona, no daylight saving) → `America/Phoenix`,
+    AKST/AKDT → `America/Anchorage`, HST → `Pacific/Honolulu`. If no zone is
+    stated, leave `timezone` `null`. Do not guess the zone from the court's
     location.
 6. **Hearing location.** Split into `department` (the courtroom/department
     designation, e.g., "Dept. 17") and `address` (street, city, state, ZIP on one
@@ -60,21 +63,21 @@ wrap the output in prose, do not include fields outside the schema.\
 
 MODELS = [
     {
-        "id": "gpt-5",
+        "id": "claude-sonnet-4-6",
         "label": "General Documents",
-        "caption": "For general use across all documents",
-        "reasoning_effort": "medium",
+        "caption": "Claude Sonnet 4.6 · reads the PDF directly (text + visuals). Fast, accurate default.",
+        "effort": None,
     },
     {
-        "id": "o3",
+        "id": "claude-sonnet-4-6",
         "label": "Complex Documents",
-        "caption": "For documents with complex legal situations",
-        "reasoning_effort": "high",
+        "caption": "Claude Sonnet 4.6 with high reasoning · slower, for dense or legally complex filings.",
+        "effort": "high",
     },
     {
-        "id": "gpt-4.1",
+        "id": "claude-opus-4-8",
         "label": "Long Documents",
-        "caption": "For 200+ page filings",
-        "reasoning_effort": None,
+        "caption": "Claude Opus 4.8 · highest capacity (up to 600 pages) for very large filings.",
+        "effort": None,
     },
 ]
