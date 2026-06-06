@@ -60,14 +60,20 @@ if uploaded:
             st.write("Error: OPENAI API Response was NONE! Please try again.")
 
         else:
+            hearing_date = result.hearing_date.display() if result.hearing_date else None
+            hearing_time = result.hearing_time.display() if result.hearing_time else None
+            hearing_location = (
+                result.hearing_location.display() if result.hearing_location else None
+            )
+
             df = pd.DataFrame(
                 [
                     ("Case Name", result.case_name),
                     ("Case Number", result.case_number),
                     ("Court", result.court_name),
-                    ("Hearing Date", result.hearing_date),
-                    ("Hearing Time", result.hearing_time),
-                    ("Hearing Location", result.hearing_location),
+                    ("Hearing Date", hearing_date),
+                    ("Hearing Time", hearing_time),
+                    ("Hearing Location", hearing_location),
                     ("Motion", result.motion_name),
                     ("Summary", result.motion_summary),
                 ],

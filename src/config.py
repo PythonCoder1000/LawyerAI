@@ -31,17 +31,24 @@ exactly matching the requested schema.
 3. **Pick the canonical occurrence.** If a value appears multiple times (e.g.,
     case number in caption and footer), use the version from the caption /
     primary heading. If versions disagree, prefer the most complete one.
-4. **Dates and times.** Return dates in `YYYY-MM-DD` format when the full date
-    is unambiguous; otherwise return the date string as written. Return times in
-    `h:mm AM/PM` format (e.g., `9:30 AM`); preserve timezone if stated
-    (e.g., `9:30 AM PT`).
-5. **Hearing location.** Include department/courtroom and address if both are
-    given (e.g., "Dept. 17, 111 N. Hill St., Los Angeles, CA 90012"). If only
-    one is given, return what is present.
-6. **Motion name.** Use the exact title of the motion/filing as it appears on
+4. **Hearing date.** Extract as numeric components: `year` (4-digit), `month`
+    (1-12), `day` (1-31). Only fill a component you can read unambiguously from
+    the document; leave any missing or ambiguous component `null`.
+5. **Hearing time.** Extract as components: `hour` (1-12 on a 12-hour clock as
+    written), `minute` (0-59), and `meridiem` (`AM`/`PM`). For `timezone`, return
+    the matching IANA zone only when a zone is explicitly stated — map
+    PT/PST/PDT → `America/Los_Angeles`, MT/MST/MDT → `America/Denver`,
+    CT/CST/CDT → `America/Chicago`, ET/EST/EDT → `America/New_York`. If no zone
+    is stated, leave `timezone` `null`. Do not guess the zone from the court's
+    location.
+6. **Hearing location.** Split into `department` (the courtroom/department
+    designation, e.g., "Dept. 17") and `address` (street, city, state, ZIP on one
+    line, e.g., "111 N. Hill St., Los Angeles, CA 90012"). Populate whichever is
+    present and leave the other `null`.
+7. **Motion name.** Use the exact title of the motion/filing as it appears on
     the caption or notice (e.g., "Defendant's Motion to Compel Further Responses
     to Requests for Production, Set One").
-7. **Motion summary.** Write a neutral 2-4 sentence summary of what the motion
+8. **Motion summary.** Write a neutral 2-4 sentence summary of what the motion
     asks the court to do and the key grounds. No quotations, no recommendations,
     no legal advice, no information that is not in the document.
 
