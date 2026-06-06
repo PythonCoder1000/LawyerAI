@@ -30,6 +30,52 @@ _TZ_ABBREV = {
     USTimeZone.arizona: "MST",
 }
 
+# Friendly labels for timezone pickers.
+TZ_LABELS = {
+    USTimeZone.pacific: "Pacific (PT)",
+    USTimeZone.mountain: "Mountain (MT)",
+    USTimeZone.central: "Central (CT)",
+    USTimeZone.eastern: "Eastern (ET)",
+    USTimeZone.alaska: "Alaska (AKT)",
+    USTimeZone.hawaii: "Hawaii (HT)",
+    USTimeZone.arizona: "Arizona (MST)",
+}
+
+# Best-effort state -> timezone map for inferring a default when a filing does
+# not state one. Convenience only; the user can always override.
+_STATE_TIMEZONES = {
+    USTimeZone.pacific: ("california", "washington", "oregon", "nevada"),
+    USTimeZone.arizona: ("arizona",),
+    USTimeZone.mountain: (
+        "colorado", "utah", "montana", "idaho", "wyoming", "new mexico",
+    ),
+    USTimeZone.central: (
+        "texas", "illinois", "missouri", "louisiana", "minnesota", "wisconsin",
+        "iowa", "oklahoma", "arkansas", "kansas", "nebraska", "tennessee",
+        "alabama", "mississippi", "north dakota", "south dakota",
+    ),
+    USTimeZone.eastern: (
+        "new york", "florida", "georgia", "virginia", "massachusetts",
+        "pennsylvania", "new jersey", "michigan", "ohio", "north carolina",
+        "south carolina", "connecticut", "maryland", "maine", "indiana",
+        "kentucky", "district of columbia", "new hampshire", "vermont",
+        "rhode island", "delaware", "west virginia",
+    ),
+    USTimeZone.alaska: ("alaska",),
+    USTimeZone.hawaii: ("hawaii",),
+}
+
+
+def infer_timezone(court_name: str | None) -> USTimeZone | None:
+    """Guess a timezone from a court name (e.g. "...District of California")."""
+    if not court_name:
+        return None
+    text = court_name.lower()
+    for zone, states in _STATE_TIMEZONES.items():
+        if any(state in text for state in states):
+            return zone
+    return None
+
 
 class HearingDate(BaseModel):
     """Hearing date as numeric components, composed into a real date on demand."""
