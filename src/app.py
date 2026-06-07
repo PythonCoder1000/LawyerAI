@@ -1,52 +1,54 @@
-import hmac
 import streamlit as st
 import pandas as pd
 from llm import analyze
 from config import MODELS
-from schemas import USTimeZone, TZ_LABELS, infer_timezone
-from ical import google_calendar_url, outlook_url
+import gcal
+
+st.set_page_config(
+    page_title="Lawyer PDF Analyzer",
+    page_icon="⚖️",
+    layout="centered",
+)
+
+# Catch Google's OAuth redirect (?code=...) before drawing anything else.
+gcal.handle_redirect()
+
+# Style the OAuth link to match a primary button. A plain anchor (not a
+# button + JS) is used so the consent page opens in this same tab and returns
+# here, sidestepping Streamlit's sandboxed component iframe.
+st.markdown(
+    """
+    <style>
+    a.gcal-connect-btn {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        text-align: center;
+        padding: 0.5rem 0.75rem;
+        background-color: #ff4b4b;
+        color: #ffffff !important;
+        border-radius: 0.5rem;
+        text-decoration: none;
+        font-weight: 600;
+    }
+    a.gcal-connect-btn:hover { background-color: #ff6c6c; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+if "event_duration" not in st.session_state:
+    st.session_state["event_duration"] = 60
 
 
-def password_entered():
-    expected = st.secrets.get("APP_PASSWORD")
-    if expected and hmac.compare_digest(st.session_state["password"], expected):
-        st.session_state["password_correct"] = True
-
-    else:
-        st.session_state["password_correct"] = False
-
-    del st.session_state["password"]
-
-
-def check_password():
-    if st.session_state.get("password_correct", False):
-        return True
-
-    st.text_input(
-        "Password", type="password", on_change=password_entered, key="password"
-    )
-
-    return False
-
-
-if not check_password():
-    st.stop()
-
-st.title("Lawyer PDF Analyzer")
-
+# --- Sidebar -----------------------------------------------------------------
 with st.sidebar:
-    st.subheader("Settings")
+    st.header("Settings")
+
     labels = [model["label"] for model in MODELS]
     captions = [model["caption"] for model in MODELS]
-
     choice = st.radio("Model", labels, captions=captions, index=0)
     selected_model = next(model for model in MODELS if model["label"] == choice)
-
-    st.divider()
-    st.markdown("**Calendar**")
-
-    if "event_duration" not in st.session_state:
-        st.session_state["event_duration"] = 60
 
     st.number_input(
         "Default event length (minutes)",
@@ -57,16 +59,60 @@ with st.sidebar:
         help="Hearings rarely state an end time; this sets the event length.",
     )
 
+    st.divider()
+    st.subheader("Google Calendar")
+    with st.container(border=True):
+        if gcal.is_connected():
+            st.success("Connected", icon="✅")
+            st.caption("Analyzed hearings sync to your calendar automatically.")
+            if st.button("Disconnect", width="stretch"):
+                gcal.disconnect()
+                st.rerun()
+        else:
+            st.warning("Not connected", icon="🔌")
+            # target="_self" navigates this tab to Google's consent page and
+            # returns here after approval — no new tab.
+            st.markdown(
+                f'<a class="gcal-connect-btn" target="_self" '
+                f'href="{gcal.auth_url()}">Connect Google Calendar</a>',
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "Connect once, then every analyzed filing is added to your "
+                "calendar automatically."
+            )
+
+
+# --- Main --------------------------------------------------------------------
+st.title("⚖️ Lawyer PDF Analyzer")
+st.caption(
+    "Upload a legal filing, click **Analyze**, and the hearing is added "
+    "straight to your Google Calendar."
+)
+
+if gcal.is_connected():
+    st.success("Google Calendar connected — hearings sync automatically.", icon="✅")
+else:
+    error = gcal.last_error()
+    if error:
+        st.error(f"Google Calendar connection failed: {error}", icon="🚫")
+    st.info(
+        "Connect Google Calendar in the sidebar to auto-sync hearings.",
+        icon="🔌",
+    )
+
 uploaded = st.file_uploader("Upload a PDF", type="pdf")
 
 if uploaded:
     # Drop a previous analysis when a different file is uploaded, so the results
-    # and calendar form never describe a hearing from the prior PDF.
+    # and sync status never describe a hearing from the prior PDF.
     if st.session_state.get("result_sig") != uploaded.file_id:
         st.session_state.pop("result", None)
+        st.session_state.pop("synced_link", None)
+        st.session_state.pop("synced_sig", None)
         st.session_state["result_sig"] = uploaded.file_id
 
-    if st.button("Analyze PDF", type="primary"):
+    if st.button("Analyze PDF", type="primary", width="stretch"):
         with st.spinner("Analyzing the filing..."):
             try:
                 result = analyze(uploaded.getvalue(), selected_model)
@@ -80,7 +126,7 @@ if uploaded:
         result = st.session_state["result"]
 
         if result is None:
-            st.write("Error: the model returned no result. Please try again.")
+            st.error("The model returned no result. Please try analyzing again.")
 
         else:
             hearing_date = result.hearing_date.display() if result.hearing_date else None
@@ -89,6 +135,7 @@ if uploaded:
                 result.hearing_location.display() if result.hearing_location else None
             )
 
+            st.subheader("Extracted details")
             df = pd.DataFrame(
                 [
                     ("Case Name", result.case_name),
@@ -102,89 +149,39 @@ if uploaded:
                 ],
                 columns=["Field", "Value"],
             )
-            st.dataframe(df, hide_index=True, use_container_width=True)
+            st.dataframe(df, hide_index=True, width="stretch")
 
-            st.subheader("Add to Calendar")
-            st.caption(
-                "Review and fill in anything missing or incorrect, then download "
-                "the event and open it in Google, Apple, or Outlook calendar."
-            )
+            # Auto-sync into the connected client's Google Calendar.
+            has_date = bool(result.hearing_date and result.hearing_date.to_date())
 
-            title = st.text_input(
-                "Title", value=result.motion_name or result.case_name or ""
-            )
-
-            event_date = st.date_input(
-                "Date",
-                value=result.hearing_date.to_date() if result.hearing_date else None,
-            )
-
-            event_time = st.time_input(
-                "Time",
-                value=result.hearing_time.to_time() if result.hearing_time else None,
-            )
-
-            # None = floating local time, interpreted in the viewer's own zone,
-            # rather than forcing one when the filing states no timezone.
-            tz_options = [None, *USTimeZone]
-            extracted_tz = result.hearing_time.timezone if result.hearing_time else None
-            default_tz = extracted_tz or infer_timezone(result.court_name)
-            tz_index = tz_options.index(default_tz) if default_tz in tz_options else 0
-            event_tz = st.selectbox(
-                "Timezone",
-                tz_options,
-                index=tz_index,
-                format_func=lambda zone: (
-                    "Local time" if zone is None else TZ_LABELS[zone]
-                ),
-            )
-
-            event_location = st.text_input(
-                "Location",
-                value=(
-                    result.hearing_location.display()
-                    if result.hearing_location
-                    else ""
-                ),
-            )
-
-            event_description = st.text_area(
-                "Description", value=result.motion_summary or ""
-            )
-
-            ready = bool(title) and event_date is not None
-            if ready:
-                event = {
-                    "title": title,
-                    "event_date": event_date,
-                    "event_time": event_time,
-                    "timezone": event_tz,
-                    "location": event_location,
-                    "description": event_description,
-                    "duration_minutes": int(st.session_state["event_duration"]),
-                }
-                gcal_link = google_calendar_url(**event)
-                outlook_link = outlook_url(**event)
+            if not gcal.is_connected():
+                st.info(
+                    "Connect Google Calendar in the sidebar to automatically "
+                    "add this hearing to your calendar.",
+                    icon="🔌",
+                )
+            elif not has_date:
+                st.warning(
+                    "No clear hearing date was found, so nothing was added to "
+                    "your calendar.",
+                    icon="⚠️",
+                )
             else:
-                gcal_link = "https://calendar.google.com"
-                outlook_link = "https://outlook.live.com"
+                # Insert exactly once per uploaded file; reruns just show status.
+                if st.session_state.get("synced_sig") != uploaded.file_id:
+                    with st.spinner("Adding to your Google Calendar..."):
+                        try:
+                            link = gcal.insert_event(
+                                result, int(st.session_state["event_duration"])
+                            )
+                        except Exception as error:
+                            st.error(f"Couldn't add to Google Calendar: {error}")
+                        else:
+                            st.session_state["synced_sig"] = uploaded.file_id
+                            st.session_state["synced_link"] = link
 
-            st.caption("Add it to your calendar:")
-            google_col, outlook_col = st.columns(2)
-            with google_col:
-                st.link_button(
-                    "Google Calendar",
-                    gcal_link,
-                    type="primary",
-                    disabled=not ready,
-                    use_container_width=True,
-                )
-            with outlook_col:
-                st.link_button(
-                    "Outlook",
-                    outlook_link,
-                    disabled=not ready,
-                    use_container_width=True,
-                )
-            if not ready:
-                st.caption("Add a title and date to enable these.")
+                if st.session_state.get("synced_sig") == uploaded.file_id:
+                    st.success("Added to your Google Calendar.", icon="✅")
+                    link = st.session_state.get("synced_link")
+                    if link:
+                        st.link_button("View event", link)
