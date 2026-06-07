@@ -70,10 +70,12 @@ with st.sidebar:
                 st.rerun()
         else:
             st.warning("Not connected", icon="🔌")
-            # target="_self" navigates this tab to Google's consent page and
-            # returns here after approval — no new tab.
+            # target="_top" navigates the whole tab (not just Streamlit's
+            # iframe) to Google's consent page. Google blocks OAuth inside an
+            # iframe with a 403, which "_self" would trigger on Streamlit Cloud;
+            # "_top" breaks out of the frame and returns here after approval.
             st.markdown(
-                f'<a class="gcal-connect-btn" target="_self" '
+                f'<a class="gcal-connect-btn" target="_top" '
                 f'href="{gcal.auth_url()}">Connect Google Calendar</a>',
                 unsafe_allow_html=True,
             )
