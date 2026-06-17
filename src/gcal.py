@@ -158,10 +158,12 @@ def _event_body(analysis: DocumentAnalysis, duration_minutes: int) -> dict:
         body["location"] = location
 
     # Paper trail: a wrong AI extraction lands silently in a legal calendar, so
-    # flag the source and keep the model's summary alongside it.
+    # flag the source and keep the case number and the model's summary alongside it.
     note = "⚠️ Auto-extracted from an uploaded filing — verify against the document."
+    case_line = f"Case No. {analysis.case_number}" if analysis.case_number else None
     summary = analysis.motion_summary
-    body["description"] = f"{note}\n\n{summary}" if summary else note
+    parts = [note, case_line, summary]
+    body["description"] = "\n\n".join(part for part in parts if part)
 
     if event_time is None:
         # All-day event; the Calendar API treats the end date as exclusive.
