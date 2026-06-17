@@ -149,6 +149,8 @@ def _event_body(analysis: DocumentAnalysis, duration_minutes: int) -> dict:
     ) or infer_timezone(analysis.court_name)
 
     title = analysis.motion_name or analysis.case_name or "Hearing"
+    if analysis.case_number:
+        title = f"{title} (Case No. {analysis.case_number})"
     body: dict = {"summary": title}
 
     location = (
